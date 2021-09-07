@@ -1,0 +1,304 @@
+# use neat algorithm to develop the AI
+# Inputs: y position of the bird (y), distance between up end and down end of the canon (d1 and d2)
+# output: yes or no to jump - based on tanH(y*w1 + d1*w2 + d2*w3 + parameter) 0.5-1 = jump : -1-0.5 = not jump
+# weights and parameters are defined by the AI
+
+import pygame as py
+import os
+import random
+import neat
+
+AI_playing = True
+
+generation = 0
+
+WIDTH = 500
+HEIGHT = 800
+
+PIPE = py.image.load(os.path.join('images flapbird', 'pipe.png'))
+
+# there are 3 images in order to create an animation effect
+S_BIRDS = [
+    py.transform.scale2x(py.image.load(os.path.join('images flapbird', 'bird1.png'))),
+    py.transform.scale2x(py.image.load(os.path.join('images flapbird', 'bird2.png'))),
+    py.transform.scale2x(py.image.load(os.path.join('images flapbird', 'bird3.png')))
+]
+Floor = py.image.load(os.path.join('images flapbird', 'base.png'))
+BG = py.image.load(os.path.join('images flapbird', 'bg.png'))
+
+S_PIPE = py.transform.scale2x(PIPE)
+S_FLOOR = py.transform.scale2x(Floor)
+S_BACKGROUND = py.transform.scale2x(BG)
+
+py.font.init()
+FONT = py.font.SysFont('arial', 48)
+# attributes: y_position, x_position, image, speed, angle...
+# methods: draw, move, jump...
+class Bird:
+    # const of birds
+    IMGS = S_BIRDS
+    # constants to define the animation of the bird to go down and up
+    ROT_SPEED = 20
+    MAX_ROT = 25
+    TIME = 5
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.speed = 0
+        self.count = 0
+        self.angle = 0
+        self.height = self.y
+        # time of how long it takes to go down
+        self.time = 0
+        self.image = S_BIRDS[0]
+
+    def jump(self):
+        self.speed = -10.4
+        self.time = 0
+        self.height = self.y
+
+
+    def move(self):
+        # calculate movement
+        self.time +=1
+        movement = self.speed * self.time + 1.5 * (self.time ** 2)
+        # adjust movement
+        if movement > 15:
+            movement = 15
+        # increase jump upwards
+        elif movement < 0:
+            movement -= 2
+        self.y += movement
+        # animation
+        # if going upwards or it is in a certain position up in the screen bird will face upwards
+        if movement < 0 or self.y < (self.height + 50):
+            if self.angle < self.MAX_ROT:
+                self.angle = self.MAX_ROT
+        else:
+            if self.angle > -90:
+                self.angle -= self.ROT_SPEED
+
+    def draw(self, screen):
+        # create movement of the wings when jumping upwards
+        # count number of frames
+        self.count += 1
+        if self.count < self.TIME:
+            self.image = self.IMGS[0]
+        elif self.count < self.TIME * 2:
+            self.image = self.IMGS[1]
+        elif self.count < self.TIME * 3:
+            self.image = self.IMGS[2]
+        elif self.count < self.TIME * 4:
+            self.image = self.IMGS[1]
+        elif self.count > self.TIME * 4:
+            self.image = self.IMGS[0]
+            self.count = 0
+
+        if self.angle <= -90:
+            self.image = self.IMGS[1]
+            self.count = self.TIME*2
+
+        #draw bird
+        image_rot = py.transform.rotate(self.image, self.angle)
+        center_image = self.image.get_rect(topleft=(self.x, self.y)).center
+        im_rect = image_rot.get_rect(center = center_image)
+        screen.blit(image_rot, im_rect.topleft)
+
+    def get_mask(self):
+        return py.mask.from_surface(self.image)
+class Pipe:
+        VELOCITY = 5
+        #size of the space of the pipe
+        DISTANCE = 300
+
+        def __init__(self, x):
+            self.x = x
+            self.height = 0
+            self.top = 0
+            self.base = 0
+            self.imagetop = py.transform.flip(S_PIPE, False, True)
+            self.imagebase = S_PIPE
+            # did the bird pass the pipe if yes True if not False
+            self.passed = False
+            self.defineheight()
+        def defineheight(self):
+            self.height = random.randrange(50, 450)
+            self.top = self.height - self.imagetop.get_height()
+            self.base = self.height + self.DISTANCE
+
+        def move(self):
+            self.x -= self.VELOCITY
+
+        def draw(self, screen):
+            screen.blit(self.imagetop, (self.x, self.top))
+            screen.blit(self.imagebase, (self.x, self.base))
+        def hit(self,bird):
+            bird_mask = bird.get_mask()
+            top_mask =py.mask.from_surface(self.imagetop)
+            base_mask = py.mask.from_surface(self.imagebase)
+
+            distance_top = (self.x - bird.x, self.top - round(bird.y))
+            distance_base = (self.x - bird.x, self.base - round(bird.y))
+
+            top_point = bird_mask.overlap(top_mask, distance_top)
+            base_point = bird_mask.overlap(base_mask, distance_base)
+
+            if base_point or top_point:
+                return True
+            else:
+                return False
+
+class FLOOR:
+    VELOCITY = 5
+    SIZE = S_FLOOR.get_width()
+    IMGF = S_FLOOR
+
+    def __init__(self, y):
+        self.y = y
+        self.x1 = 0
+        self.x2 = self.SIZE
+
+    def move(self):
+        self.x1 -= self.VELOCITY
+        self.x2 -= self.VELOCITY
+
+        if self.x1 + self.SIZE < 0:
+            self.x1 = self.x2 + self.SIZE
+        if self.x2 + self.SIZE < 0:
+            self.x2 = self.x1 + self.SIZE
+
+    def draw(self, screen):
+        screen.blit(self.IMGF, (self.x1, self.y))
+        screen.blit(self.IMGF, (self.x2, self.y))
+
+def draw_screen(screen, birds, pipes, floor, score):
+    screen.blit(S_BACKGROUND, (0, 0))
+    #already allowing to draw more than one bird to allow AI to do it
+    for bird in birds:
+        bird.draw(screen)
+    for pipe in pipes:
+        pipe.draw(screen)
+    floor.draw(screen)
+    text = FONT.render(f"Score: {score}", 1, (255, 255, 255))
+    if AI_playing:
+        text = FONT.render(f"Generation: {generation}", 1, (255, 255, 255))
+        screen.blit(text, (10, 10))
+
+    screen.blit(text, (WIDTH - 10 - text.get_width(), 10))
+    py.display.update()
+
+def main(genomes, config):
+    global generation
+    generation += 1
+
+    if AI_playing:
+        networks = []
+        list_genomes = []
+        birds = []
+        for _, genome in genomes:
+            network = neat.nn.FeedForwardNetwork.create(genome, config)
+            networks.append(network)
+            genome.fitness = 0
+            list_genomes.append(genome)
+            birds.append(Bird(240, 360))
+    else:
+        birds = [Bird(240, 360)]
+    pipes = [Pipe(700)]
+    score = 0
+    screen = py.display.set_mode((WIDTH, HEIGHT))
+    floor = FLOOR(730)
+    clock = py.time.Clock()
+
+    running = True
+
+    while running:
+        clock.tick(30)
+        # events in the game
+        for i in py.event.get():
+           #quit game
+            if i.type == py.QUIT:
+                running = False
+                py.quit()
+                quit()
+
+            if not AI_playing:
+                if i.type == py.KEYDOWN:
+                    if i.key == py.K_SPACE:
+                        for bird in birds:
+                            bird.jump()
+        index_pipe = 0
+        if len(birds) > 0:
+            if len(pipes) > 1 and birds[0].x > (pipes[0].x + pipes[0].imagetop.get_width()):
+                index_pipe = 1
+        else:
+            running = False
+            break
+
+        for i, bird in enumerate(birds):
+            bird.move()
+            # increase fitness of the bird
+            list_genomes[i].fitness += 0.1
+            output = networks[i].activate((bird.y,
+                                        abs(bird.y - pipes[index_pipe].height),
+                                        abs(bird.y - pipes[index_pipe].base)))
+            # -1 e 1 -> if the output for > 0.5 bird jump
+            if output[0] > 0.5:
+                bird.jump()
+        floor.move()
+
+        add_pipe = False
+        remove_pipe = []
+        for pipe in pipes:
+            for j, bird in enumerate(birds):
+                if pipe.hit(bird):
+                    birds.pop(j)
+                    if AI_playing:
+                        list_genomes[j].fitness -= 1
+                        list_genomes.pop(j)
+                        networks.pop(j)
+                if not pipe.passed and bird.x > pipe.x:
+                    pipe.passed = True
+                    add_pipe = True
+            pipe.move()
+            if pipe.x + pipe.imagetop.get_width() < 0:
+                remove_pipe.append(pipe)
+
+        if add_pipe:
+            score += 1
+            pipes.append(Pipe(600))
+            for genome in list_genomes:
+                genome.fitness += 5
+        for pipe in remove_pipe:
+            pipes.remove(pipe)
+
+        for i, bird in enumerate(birds):
+            if (bird.y + bird.image.get_height()) > floor.y or bird.y < 0:
+                birds.pop(i)
+                if AI_playing:
+                    list_genomes.pop(i)
+                    networks.pop(i)
+
+        draw_screen(screen, birds, pipes, floor, score)
+
+def runy(path_config):
+    config = neat.config.Config(neat.DefaultGenome,
+                                neat.DefaultReproduction,
+                                neat.DefaultSpeciesSet,
+                                neat.DefaultStagnation,
+                                path_config)
+
+    population = neat.Population(config)
+    population.add_reporter(neat.StdOutReporter(True))
+    population.add_reporter(neat.StatisticsReporter())
+
+    if AI_playing:
+        population.run(main, 150)
+    else:
+        main(None, None)
+
+
+
+if __name__ == '__main__':
+    pathy = os.path.dirname(__file__)
+    path_config = os.path.join(pathy, 'config.txt')
+    runy(path_config)
